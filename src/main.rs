@@ -1,9 +1,8 @@
 extern crate actix_web;
-
-
-use actix_web::actix::{Actor, Addr, Context, Handler, Message};
-use actix_web::{server, App, HttpRequest, Responder};
+use actix_web::actix::{Actor, Addr, Context, Handler, MailboxError, Message};
+use actix_web::{server, App, AsyncResponder, HttpRequest};
 use futures::future::Future;
+
 pub struct AppState {
     pub example: Addr<ExampleStruct>,
 }
@@ -34,7 +33,7 @@ impl Handler<Incrementer> for ExampleStruct {
     }
 }
 
-fn increment(req: &HttpRequest<AppState>) -> impl Responder {
+fn increment(req: &HttpRequest<AppState>) -> Box<Future<Item = String, Error = MailboxError>> {
     let ex: &Addr<ExampleStruct> = &req.state().example;
 
     println!("Sending request to actor");
@@ -43,13 +42,12 @@ fn increment(req: &HttpRequest<AppState>) -> impl Responder {
             println!("Received response from actor");
             int.to_string()
         })
-        .wait()
+        .responder()
 }
 
 fn main() {
-    let addr = ExampleStruct { count: 0 }.start();
-
-    server::new(move || {
+    server::new(|| {
+        let addr = ExampleStruct { count: 0 }.start();
         App::with_state(AppState {
             example: addr.clone(),
         })
@@ -79,17 +77,26 @@ mod tests {
         })
     }
 
+    macro_rules! expect_increment_to_ret {
+        ($srv:ident, $expected_status:expr, $expected_body:expr) => {
+            {
+                let request = $srv.client(http::Method::GET, &"/").finish().unwrap();
+                let response = $srv.execute(request.send()).unwrap();
+                let bytes = $srv.execute(response.body()).unwrap();
+                let body = str::from_utf8(&bytes).unwrap();
+
+                assert_eq!(response.status(), $expected_status);
+                assert_eq!(body, $expected_body);
+            }
+        };
+    }
+
     #[test]
-    fn increment_counter() {
+    fn test_increment_counter() {
         let mut srv = test_server();
 
-        let request = srv.client(http::Method::GET, &"/").finish().unwrap();
-
-        let response = srv.execute(request.send()).unwrap();
-        assert_eq!(response.status(), 200);
-
-        let bytes = srv.execute(response.body()).unwrap();
-        let body = str::from_utf8(&bytes).unwrap();
-        assert_eq!(body, "1");
+        expect_increment_to_ret!(srv, 200, "1");
+        expect_increment_to_ret!(srv, 200, "2");
+        expect_increment_to_ret!(srv, 200, "3");
     }
 }
