@@ -37,8 +37,12 @@ impl Handler<Incrementer> for ExampleStruct {
 fn increment(req: &HttpRequest<AppState>) -> impl Responder {
     let ex: &Addr<ExampleStruct> = &req.state().example;
 
+    println!("Sending request to actor");
     ex.send(Incrementer { by: 1 })
-        .map(|int| int.to_string())
+        .map(|int| {
+            println!("Received response from actor");
+            int.to_string()
+        })
         .wait()
 }
 
